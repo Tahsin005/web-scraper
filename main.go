@@ -8,16 +8,14 @@ import (
 	"time"
 
 	"github.com/Tahsin005/web-scraper/internal/database"
+	"github.com/Tahsin005/web-scraper/internal/handlers"
+	"github.com/Tahsin005/web-scraper/internal/scraper"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
 
 	_ "github.com/lib/pq"
 )
-
-type apiConfig struct {
-	DB *database.Queries
-}
 
 func main() {
 	godotenv.Load(".env")
@@ -36,11 +34,13 @@ func main() {
 		log.Fatal("Can't connect to the database: " + err.Error())
 	}
 
-	apiCfg := apiConfig{
-		DB: database.New(conn),
+	db := database.New(conn)
+
+	h := &handlers.Handler{
+		DB: db,
 	}
 
-	go startScraping(apiCfg.DB, 10, time.Minute)
+	go scraper.StartScraping(db, 10, time.Minute)
 
 	router := chi.NewRouter()
 
@@ -54,19 +54,18 @@ func main() {
 	}))
 
 	v1Router := chi.NewRouter()
-	v1Router.Get("/healthz", handlerReadiness)
-	v1Router.Get("/err", handlerError)
-	v1Router.Post("/users", apiCfg.handlerCreateUser)
-	v1Router.Get("/users", apiCfg.middlewareAuth(apiCfg.handlerGetUserByAPIKey))
-	v1Router.Post("/feeds", apiCfg.middlewareAuth(apiCfg.handlerCreateFeed))
-	v1Router.Get("/feeds", apiCfg.handlerGetFeeds)
-	v1Router.Post("/feed_follows", apiCfg.middlewareAuth(apiCfg.handlerCreateFeedFollows))
-	v1Router.Get("/feed_follows", apiCfg.middlewareAuth(apiCfg.handlerGetFeedFollows))
-	v1Router.Delete("/feed_follows/{feedFollowID}", apiCfg.middlewareAuth(apiCfg.handlerDeleteFeedFollow))
-	v1Router.Get("/posts", apiCfg.middlewareAuth(apiCfg.handlerGetPostsForUser))
-	
+	v1Router.Get("/healthz", h.HandlerReadiness)
+	v1Router.Post("/users", h.HandlerCreateUser)
+	v1Router.Get("/users", h.AuthedHandler(h.HandlerGetUserByAPIKey))
+	v1Router.Post("/feeds", h.AuthedHandler(h.HandlerCreateFeed))
+	v1Router.Get("/feeds", h.HandlerGetFeeds)
+	v1Router.Post("/feed_follows", h.AuthedHandler(h.HandlerCreateFeedFollows))
+	v1Router.Get("/feed_follows", h.AuthedHandler(h.HandlerGetFeedFollows))
+	v1Router.Delete("/feed_follows/{feedFollowID}", h.AuthedHandler(h.HandlerDeleteFeedFollow))
+	v1Router.Get("/posts", h.AuthedHandler(h.HandlerGetPostsForUser))
+
 	router.Mount("/v1", v1Router)
-	
+
 	srv := &http.Server{
 		Addr:    ":" + portString,
 		Handler: router,
